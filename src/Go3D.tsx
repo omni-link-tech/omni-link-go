@@ -225,6 +225,8 @@ export default function Go3D() {
         const res = await fetch('http://localhost:3000/api/board')
         const data = await res.json()
         const srv: number[][] = data.board
+        let externalMoveDetected = false;
+
         for (let y = 0; y < srv.length; y++) {
           for (let x = 0; x < srv[y].length; x++) {
             const val = srv[y][x]
@@ -240,10 +242,20 @@ export default function Go3D() {
                 s.position.set(wx, s.scale.y + 0.003, wz)
                 stoneRoot.add(s)
                 stoneMeshes[x][y] = s
+
+                // If it's the external agent moving (White), trigger a turn advance
+                if (val === 2) {
+                  externalMoveDetected = true;
+                }
               }
               board[x][y] = val
             }
           }
+        }
+
+        if (externalMoveDetected) {
+          turn = turn === 1 ? 2 : 1;
+          updateStatus();
         }
       } catch (err) {
         // eslint-disable-next-line no-console
@@ -405,6 +417,20 @@ export default function Go3D() {
       turn = turn === 1 ? 2 : 1
       updateStatus()
       updateScoreboard()
+
+      // SYNC WITH SERVER: Send the move to the backend so the Agent sees it
+      const letters = 'ABCDEFGHJKLMNOPQRST'
+      const col = letters[i]
+      const row = j + 1
+      const intersection = `${col}${row}`
+
+      fetch('http://localhost:3000/api/place', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ intersection, color })
+      }).catch(err => console.error("Failed to sync move to server:", err))
     }
 
     // ===== Interaction =====
@@ -427,15 +453,25 @@ export default function Go3D() {
     renderer.domElement.addEventListener('pointerdown', onPointerDown)
 
     // ===== UI callbacks (wired via DOM dataset hooks below) =====
-    function resetGame() {
+    async function resetGame() {
+      // 1. Tell the server to reset immediately
+      try {
+        await fetch('http://localhost:3000/api/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ size: N })
+        });
+      } catch (err) {
+        console.error("Failed to reset server:", err);
+      }
+
+      // 2. Clear local UI
       clearGroup(stoneRoot)
       for (let a = 0; a < N; a++) for (let b = 0; b < N; b++) board[a][b] = 0, (stoneMeshes[a][b] = null)
       turn = 1
       captures = { 1: 0, 2: 0 }
       updateStatus()
       updateScoreboard()
-      // keep server in sync if it's running
-      fetch('http://localhost:3000/api/reset', { method: 'POST' }).catch(() => {})
     }
 
     function cycleBoard() {
@@ -445,6 +481,13 @@ export default function Go3D() {
       setupBoardSize(next)
       const btn = mountRef.current?.querySelector<HTMLButtonElement>('[data-go-size]')
       if (btn) btn.textContent = `Board Size: ${next}×${next}`
+
+      // Inform server of new board size
+      fetch('http://localhost:3000/api/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ size: next })
+      }).catch(err => console.error("Failed to sync board size to server:", err))
     }
 
     // ===== Render loop =====
