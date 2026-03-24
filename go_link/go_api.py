@@ -14,8 +14,7 @@ def place(intersection: str, color: str) -> None:
         raise ValueError(f"Invalid color: {color}. Must be 'black' or 'white'.")
     
     r = requests.post(API, json={'intersection': intersection, 'color': color_num})
-    print(f"Placing {color} ({color_num}) at {intersection}")
-    print(r.json())
+    r.raise_for_status()
 
 if __name__ == '__main__':
     # example: place white stone at D6
